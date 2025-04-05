@@ -35,7 +35,7 @@ class DataPreprocessor:
         self.use_clahe = use_clahe
         self.image_processor = ImageProcessor(img_size=img_size)
         
-        # Tạo data generator với các tham số tăng cường dữ liệu
+        # Tăng cường data augmentation
         self.data_gen = ImageDataGenerator(
             preprocessing_function=self.preprocess_input,
             rotation_range=rotation_range,
@@ -47,12 +47,31 @@ class DataPreprocessor:
             vertical_flip=vertical_flip,
             brightness_range=brightness_range,
             fill_mode=fill_mode,
-            validation_split=validation_split
+            validation_split=validation_split,
+            # Thêm các augmentation mới
+            channel_shift_range=50.0,  # Thay đổi kênh màu
+            cval=0.0,  # Giá trị điền cho các pixel ngoài ảnh
+            interpolation_order=1,  # Sử dụng bilinear interpolation
+            dtype='float32'  # Đảm bảo kiểu dữ liệu nhất quán
         )
         
         # Data generator không có augmentation cho test (Mới)
         self.test_gen = ImageDataGenerator(
             preprocessing_function=self.preprocess_input
+        )
+        
+        # Tạo validation generator với augmentation nhẹ hơn
+        self.val_gen = ImageDataGenerator(
+            preprocessing_function=self.preprocess_input,
+            rotation_range=10,  # Giảm rotation
+            width_shift_range=0.1,  # Giảm shift
+            height_shift_range=0.1,
+            shear_range=0.1,
+            zoom_range=0.1,
+            horizontal_flip=True,
+            vertical_flip=False,
+            fill_mode='nearest',
+            validation_split=validation_split
         )
     
     def preprocess_input(self, x):
@@ -92,8 +111,8 @@ class DataPreprocessor:
             shuffle=True
         )
         
-        # Tạo validation generator
-        val_generator = self.data_gen.flow_from_directory(
+        # Tạo validation generator với augmentation nhẹ hơn
+        val_generator = self.val_gen.flow_from_directory(
             data_dir,
             target_size=(self.img_size, self.img_size),
             batch_size=batch_size,
@@ -177,7 +196,7 @@ class DataPreprocessor:
         
         # Chuyển đổi sang dict
         return {idx: weight for idx, weight in enumerate(class_weights_array)}
-
+    
     def _plot_class_distribution(self, data_dir, class_indices):
         """
         Vẽ biểu đồ phân phối lớp
@@ -186,46 +205,22 @@ class DataPreprocessor:
             data_dir: Thư mục chứa dữ liệu
             class_indices: Dict ánh xạ tên lớp với chỉ số
         """
-        # Đếm số lượng mẫu cho mỗi lớp
         class_counts = {}
-        for class_name in class_indices.keys():
-            class_dir = os.path.join(data_dir, class_name)
-            if os.path.isdir(class_dir):
-                count = len([f for f in os.listdir(class_dir) 
-                            if os.path.isfile(os.path.join(class_dir, f))])
-                class_counts[class_name] = count
+        for class_name, class_idx in class_indices.items():
+            class_path = os.path.join(data_dir, class_name)
+            if os.path.isdir(class_path):
+                num_samples = len([f for f in os.listdir(class_path) if os.path.isfile(os.path.join(class_path, f))])
+                class_counts[class_name] = num_samples
         
-        if not class_counts:
-            print("Warning: No classes found to plot distribution.")
-            return
-            
-        # Tạo DataFrame
-        df = pd.DataFrame({
-            'Class': list(class_counts.keys()),
-            'Count': list(class_counts.values())
-        })
-        
-        # Sắp xếp theo số lượng giảm dần
-        df = df.sort_values('Count', ascending=False)
-        
-        # Vẽ biểu đồ
-        plt.figure(figsize=(15, 8))
-        plt.bar(df['Class'], df['Count'])
-        plt.xticks(rotation=90)
-        plt.xlabel('Class')
-        plt.ylabel('Number of Samples')
-        plt.title('Class Distribution')
+        plt.figure(figsize=(12, 6))
+        plt.bar(class_counts.keys(), class_counts.values())
+        plt.title('Phân phối lớp trong dataset')
+        plt.xlabel('Lớp')
+        plt.ylabel('Số lượng mẫu')
+        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
-        
-        # Tạo thư mục output nếu chưa có
-        output_dir = os.path.join(os.path.dirname(os.path.dirname(data_dir)), 'output_plots')
-        os.makedirs(output_dir, exist_ok=True)
-        
-        plot_path = os.path.join(output_dir, 'class_distribution.png')
-        plt.savefig(plot_path)
+        plt.savefig(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'class_distribution.png'))
         plt.close()
-        
-        print(f"Biểu đồ phân phối lớp đã được lưu tại: {plot_path}")
 
     def load_and_preprocess_dataset(self, data_dir):
         """Load và tiền xử lý toàn bộ dataset (Sử dụng ImageProcessor)"""
